@@ -1,0 +1,8 @@
+.vscode
+embeddings/
+masks/
+merges/
+padded_images/
+padded_segmentations/
+raw_data/
+*.tif
