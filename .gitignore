@@ -1,8 +1,18 @@
+# Tools 
 .vscode
+.venv
+.ipynb_checkpoints
+__pycache__/
+
+# Data 
 embeddings/
+xzy_embeddings/
+yzx_embeddings/
+zyx_embeddings/
 masks/
 merges/
 padded_images/
 padded_segmentations/
 raw_data/
 *.tif
+*.png

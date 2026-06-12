@@ -9,7 +9,7 @@ import numpy as np
 import tifffile as tiff
 
 from micro_sam.util import precompute_image_embeddings, get_sam_model
-from micro_sam.instance_segmentation import InstanceSegmentationWithDecoder, TiledInstanceSegmentationWithDecoder
+from micro_sam.automatic_segmentation import automatic_instance_segmentation, get_predictor_and_segmenter
 
 MODEL_TYPE = "vit_l_em_organelles"
 
@@ -49,16 +49,17 @@ def precompute_embeddings(zyx_path: str, yzx_path: str, xzy_path: str) -> None:
 
 # Note: from an architecture perspective, I could just call the API from micro_sam which has this exact function.
 # but gonna keep this here for now.
-def run_ais(img_path: str, embedding_path: str) -> None:
+def run_ais(img_path: str, embedding_path: str, output_path: str, predictor, segmenter) -> None:
     """Run the automatic instance segmentation on an image view, using the pre-computed embeddings."""
-    raw_image = tiff.imread(img_path)
-    segmenter_class = InstanceSegmentationWithDecoder
+    return automatic_instance_segmentation(predictor=predictor, segmenter=segmenter, input_path=img_path, output_path=output_path, embedding_path=embedding_path)
 
 def merge_segmentations(zyx_path: str, yzx_path: str, xzy_path: str, padding: int, fusion_mode: str) -> None:
     """Given the three segmentation masks resulting from running the annotator on each of the views, merge them into a single 3D segmentation mask."""
     zyx = tiff.imread(zyx_path) # (Z, Y, X)
-    yzx = tiff.imread(yzx_path).transpose(1, 0, 2) # (Y, Z, X) -> (Z, Y, X)
-    xzy = tiff.imread(xzy_path).transpose(2, 0, 1) # (X, Z, Y) -> (Z, Y, X)
+    yzx = tiff.imread(yzx_path) # (Y, Z, X) -> (Z, Y, X)
+    xzy = tiff.imread(xzy_path) # (X, Z, Y) -> (Z, Y, X)
+    yzx = np.transpose(yzx, (1, 0, 2))  # (Z, Y, X)
+    xzy = np.transpose(xzy, (1, 2, 0))
 
     # Undo padding if it was applied
     if padding:
@@ -83,10 +84,55 @@ def merge_segmentations(zyx_path: str, yzx_path: str, xzy_path: str, padding: in
     tiff.imwrite("merged_segmentation.tif", merged)
     return
 
-def main() -> int:
+def main(args) -> int:
     # --------------------
     # 1 TRANSFORM INPUT
     # --------------------
+    transform_input(
+        args.input, 
+        args.padding
+    )
+
+    # --------------------
+    # 2 PRECOMPUTE EMB.
+    # --------------------
+    paths = ["pad_img_zyx.tif", "pad_img_yzx.tif", "pad_img_xzy.tif"]
+    images = [tiff.imread(path) for path in paths]
+    precompute_embeddings(
+        images[0], 
+        images[1], 
+        images[2]
+    )
+
+    # --------------------
+    # 3. SEGMENT 
+    # --------------------
+    predictor, segmenter = get_predictor_and_segmenter(
+        model_type=MODEL_TYPE, 
+        checkpoint=None, 
+        device=None
+    )
+    for image in paths:
+        run_ais(
+            img_path=image, 
+            embedding_path=f"{image[8:11]}_embeddings", 
+            output_path=f"{image[8:11]}_seg.tif",
+            predictor=predictor,
+            segmenter=segmenter
+        )
+
+    # --------------------
+    # 4. MERGE
+    # --------------------
+    merge_segmentations(
+        zyx_path="zyx_seg.tif", 
+        yzx_path="yzx_seg.tif", 
+        xzy_path="xzy_seg.tif",
+        padding=args.padding,
+        fusion_mode=args.fusion_mode
+    )
+        
+    
     return 0
 
 if __name__ == "__main__":
@@ -121,4 +167,6 @@ if __name__ == "__main__":
         help='Amount of padding to add to the images (default: 0, no padding)'
     )
 
-    main()
+    args = parser.parse_args()
+
+    main(args)
